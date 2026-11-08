@@ -19,7 +19,7 @@ const font = (size) => `${size}px Rajdhani`;
 const images = new Map();
 export function gunImage(url) {
   if (!images.has(url)) {
-    images.set(url, fetch(url).then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(`${r.status}`))))
+    images.set(url, fetch(url, { signal: AbortSignal.timeout(10_000) }).then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(`${r.status}`))))
       .then((b) => loadImage(Buffer.from(b)))
       .catch(() => { images.delete(url); return null; }));
   }
