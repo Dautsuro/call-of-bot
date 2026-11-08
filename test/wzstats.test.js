@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { attachments, parsePage, rankWeapons } from '../src/wzstats.js';
+import { attachments, diffSnapshots, parsePage, rankWeapons, snapshot } from '../src/wzstats.js';
 
 const store = {
   wzStatsTierList: { mw4: { META: ['m4', 'ghost'], A: ['ak'], C: ['krait', 'gs50'] } },
@@ -34,4 +34,21 @@ test('attachments keeps only slots, in in-game order', () => {
     apex: { slot: 'apex', name: 'A' }, weird: { slot: 'newSlot', name: 'N' }, cons: [],
   };
   assert.deepEqual(attachments(build).map((a) => a.name), ['A', 'M', 'L', 'N']);
+});
+
+test('diffSnapshots reports tier/rank moves, new and removed weapons, per mode', () => {
+  const before = snapshot(store);
+  assert.deepEqual(diffSnapshots(before, snapshot(store)), {});
+
+  const next = structuredClone(store);
+  next.wzStatsTierList.mw4 = { META: ['ak', 'm4'], C: ['krait'] }; // AK up to META #1, M4 down to #2, .50 GS gone
+  next.wzStatsTierList.dmzPvp = { A: ['m4'] }; // new in another mode
+  const d = diffSnapshots(before, snapshot(next));
+  assert.deepEqual(d.mw4, [
+    { name: 'M4', type: 'ASSAULT_RIFLE', before: { tier: 'META', rank: 1 }, after: { tier: 'META', rank: 2 } },
+    { name: 'AK', type: 'ASSAULT_RIFLE', before: { tier: 'A', rank: 2 }, after: { tier: 'META', rank: 1 } },
+    { name: '.50 GS', type: 'PISTOL', before: { tier: 'C', rank: 2 }, after: null },
+  ]);
+  assert.deepEqual(d.dmzPvp, [{ name: 'M4', type: 'ASSAULT_RIFLE', before: null, after: { tier: 'A', rank: 1 } }]);
+  assert.deepEqual(Object.keys(d), ['mw4', 'dmzPvp']);
 });

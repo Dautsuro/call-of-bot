@@ -31,6 +31,27 @@ export function rankWeapons(store, mode) {
     }));
 }
 
+// Snapshot of every mode's ranking: { mode: { weaponId: { name, type, tier, rank } } }.
+export const snapshot = (store) => Object.fromEntries(Object.keys(MODES).map((mode) =>
+  [mode, Object.fromEntries(rankWeapons(store, mode).map(({ id, name, type, tier, rank }) => [id, { name, type, tier, rank }]))]));
+
+// Changes between two snapshots: { mode: [{ name, type, before, after }] }, before/after = { tier, rank } or null.
+export function diffSnapshots(prev, next) {
+  const out = {};
+  for (const mode of Object.keys(MODES)) {
+    const a = prev[mode] ?? {}, b = next[mode] ?? {};
+    const changes = [...new Set([...Object.keys(a), ...Object.keys(b)])]
+      .filter((id) => a[id]?.tier !== b[id]?.tier || a[id]?.rank !== b[id]?.rank)
+      .map((id) => {
+        const w = b[id] ?? a[id];
+        const pick = (x) => (x ? { tier: x.tier, rank: x.rank } : null);
+        return { name: w.name, type: w.type, before: pick(a[id]), after: pick(b[id]) };
+      });
+    if (changes.length) out[mode] = changes;
+  }
+  return out;
+}
+
 const imageUrl = (w) => `https://img.wzstats.gg/${w.id}${w.imageVersion ? `_version${w.imageVersion}` : ''}/public`;
 
 // Attachments of a build in in-game slot order: [{ slot, name }].

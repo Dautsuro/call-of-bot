@@ -12,6 +12,14 @@ Bot Discord qui récupère les classes méta de Modern Warfare 4 sur [wzstats.gg
 
 Option `mode` sur les deux commandes : Multijoueur (par défaut), Résurgence, DMZ PvP, DMZ PvE.
 
+## Suivi automatique de la tier list
+
+Si `ALERT_CHANNEL_ID` est rempli dans `.env`, le bot vérifie la tier list toutes les 30 minutes (les 4 modes) et poste dans ce salon ce qui a changé depuis le contrôle précédent : armes qui montent ⬆️ ou descendent ⬇️ (tier et rang dans leur catégorie), nouvelles armes 🆕, armes retirées ❌.
+
+Pour trouver l'ID d'un salon : Paramètres Discord → Avancés → activer le *Mode développeur*, puis clic droit sur le salon → *Copier l'identifiant du salon*. Le bot doit pouvoir voir ce salon et y envoyer des messages.
+
+Le dernier état connu est gardé dans `last-tierlist.json`, donc rien n'est perdu si le bot redémarre. Au tout premier lancement, il enregistre juste l'état actuel sans rien poster.
+
 ## Installation
 
 1. Installer [Node.js](https://nodejs.org) 20.6 ou plus récent.
@@ -20,7 +28,7 @@ Option `mode` sur les deux commandes : Multijoueur (par défaut), Résurgence, D
 4. Dans ce dossier :
    ```bash
    npm install
-   cp .env.example .env   # puis coller le token dans .env
+   cp .env.example .env   # puis coller le token (et l'ID du salon, optionnel) dans .env
    npm start
    ```
 
