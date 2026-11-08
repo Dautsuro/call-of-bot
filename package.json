@@ -2,12 +2,15 @@
   "name": "call-of-bot",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=20.6" },
+  "engines": {
+    "node": ">=20.6"
+  },
   "scripts": {
     "start": "node --env-file=.env src/index.js",
     "test": "node --test"
   },
   "dependencies": {
+    "@napi-rs/canvas": "^1.1.0",
     "discord.js": "^14.28.1"
   }
 }
