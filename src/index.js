@@ -1,5 +1,6 @@
 import {
   ActionRowBuilder, ButtonBuilder, ButtonStyle, Client, EmbedBuilder, Events, GatewayIntentBits, SlashCommandBuilder,
+  StringSelectMenuBuilder,
 } from 'discord.js';
 import { readFile, writeFile } from 'node:fs/promises';
 import {
@@ -48,28 +49,37 @@ async function meta(interaction, mode) {
   await sendEmbeds(interaction, await Promise.all(weapons.map((w) => classEmbed(w, mode))));
 }
 
-// One message per category: ranked list + one button per weapon that posts its class.
-// Discord allows 25 buttons per message (5 rows of 5), so a whole tier list can't fit in one.
-function categoryMessage(type, list, mode) {
-  const embed = new EmbedBuilder().setColor(TIER_COLORS[list[0].tier] ?? 0x888888)
-    .setTitle(`Tier list · ${CATEGORIES[type] ?? type}`).setURL('https://wzstats.gg/mw4/meta')
-    .setDescription(list.map((w) => `${w.rank}. **${w.name}** · ${w.tier}`).join('\n'))
-    .setFooter({ text: `${MODES[mode]} · wzstats.gg` });
-  const buttons = list.slice(0, 25).map((w) => new ButtonBuilder().setCustomId(`class:${mode}:${w.id}`)
-    .setLabel(`${w.rank}. ${w.name}`).setStyle(w.tier === 'META' ? ButtonStyle.Danger : ButtonStyle.Secondary));
-  const rows = [];
-  for (let i = 0; i < buttons.length; i += 5) rows.push(new ActionRowBuilder().addComponents(buttons.slice(i, i + 5)));
-  return { embeds: [embed], components: rows };
-}
+const chunk = (arr, n) => Array.from({ length: Math.ceil(arr.length / n) }, (_, i) => arr.slice(i * n, i * n + n));
+const rankLine = (w) => `${w.rank}. **${w.name}** · ${w.tier}`;
 
+// Always one message. One category: a button per weapon (max 25 = 5 rows of 5).
+// Whole tier list: too many weapons for buttons, so dropdowns of 25 weapons each (max 5 rows = 125 weapons).
 async function tierlist(interaction, mode, category) {
   const weapons = rankWeapons(await fetchStore(), mode);
-  const types = category ? [category] : [...new Set([...Object.keys(CATEGORIES), ...weapons.map((w) => w.type)])];
-  const messages = types.map((type) => weapons.filter((w) => w.type === type)).filter((list) => list.length)
-    .map((list) => categoryMessage(list[0].type, list, mode));
-  if (!messages.length) return interaction.editReply(`Aucune arme dans la catégorie ${CATEGORIES[category] ?? category}.`);
-  await interaction.editReply(messages[0]);
-  for (const m of messages.slice(1)) await interaction.followUp(m);
+  const embed = new EmbedBuilder().setColor(TIER_COLORS.META).setURL('https://wzstats.gg/mw4/meta')
+    .setFooter({ text: `${MODES[mode]} · wzstats.gg · clique sur une arme pour voir sa classe` });
+
+  if (category) {
+    const list = weapons.filter((w) => w.type === category);
+    if (!list.length) return interaction.editReply(`Aucune arme dans la catégorie ${CATEGORIES[category] ?? category}.`);
+    embed.setTitle(`Tier list · ${CATEGORIES[category] ?? category}`).setDescription(list.map(rankLine).join('\n'));
+    const buttons = list.slice(0, 25).map((w) => new ButtonBuilder().setCustomId(`class:${mode}:${w.id}`)
+      .setLabel(`${w.rank}. ${w.name}`).setStyle(w.tier === 'META' ? ButtonStyle.Danger : ButtonStyle.Secondary));
+    return interaction.editReply({ embeds: [embed], components: chunk(buttons, 5).map((b) => new ActionRowBuilder().addComponents(b)) });
+  }
+
+  const types = [...new Set([...Object.keys(CATEGORIES), ...weapons.map((w) => w.type)])];
+  const sorted = types.flatMap((type) => weapons.filter((w) => w.type === type));
+  embed.setTitle('Tier list MW4');
+  for (const type of types) {
+    const list = sorted.filter((w) => w.type === type);
+    if (list.length) embed.addFields({ name: CATEGORIES[type] ?? type, value: list.map(rankLine).join('\n'), inline: true });
+  }
+  const menus = chunk(sorted, 25).slice(0, 5).map((list, i) => new StringSelectMenuBuilder()
+    .setCustomId(`class:${mode}:menu${i}`)
+    .setPlaceholder(`Voir la classe de… (${CATEGORIES[list[0].type] ?? list[0].type} → ${CATEGORIES[list.at(-1).type] ?? list.at(-1).type})`)
+    .addOptions(list.map((w) => ({ label: `${w.rank}. ${w.name}`, description: `${CATEGORIES[w.type] ?? w.type} · ${w.tier}`, value: w.id }))));
+  await interaction.editReply({ embeds: [embed], components: menus.map((m) => new ActionRowBuilder().addComponents(m)) });
 }
 
 // Shared by the weapon buttons and /classe: `query` is a weapon id or name.
@@ -134,13 +144,14 @@ client.once(Events.ClientReady, async (c) => {
 client.on(Events.InteractionCreate, async (interaction) => {
   if (interaction.isAutocomplete()) return autocompleteWeapon(interaction).catch((err) => console.error('Autocomplétion :', err));
   const isCommand = interaction.isChatInputCommand();
-  const isButton = interaction.isButton() && interaction.customId.startsWith('class:');
-  if (!isCommand && !isButton) return;
+  // Weapon buttons carry the weapon in their id (class:<mode>:<weapon>); dropdowns in their selected value.
+  const isPick = (interaction.isButton() || interaction.isStringSelectMenu()) && interaction.customId.startsWith('class:');
+  if (!isCommand && !isPick) return;
   try {
     await interaction.deferReply();
-    if (isButton) {
+    if (isPick) {
       const [, mode, weaponId] = interaction.customId.split(':');
-      return await showClass(interaction, mode, weaponId);
+      return await showClass(interaction, mode, interaction.isStringSelectMenu() ? interaction.values[0] : weaponId);
     }
     const mode = interaction.options.getString('mode') ?? 'mw4';
     if (interaction.commandName === 'meta') await meta(interaction, mode);
