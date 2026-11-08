@@ -7,10 +7,13 @@ Bot Discord qui récupère les classes méta de Modern Warfare 4 sur [wzstats.gg
 | Commande | Ce que ça fait |
 |---|---|
 | `/meta` | Poste toutes les armes du tier META, chacune avec l'image de l'arme et sa classe (accessoires). |
-| `/tierlist` | Tier list complète, rangée par catégorie (fusil d'assaut, mitraillette, sniper, pistolet…). |
-| `/tierlist categorie:Pistolet` | Classement d'une seule catégorie + un menu pour choisir une arme et afficher sa classe. |
+| `/tierlist` | Tier list complète : un message par catégorie (fusil d'assaut, mitraillette, sniper, pistolet…), avec un bouton par arme. Cliquer sur une arme poste sa classe. |
+| `/tierlist categorie:Pistolet` | Pareil, pour une seule catégorie. |
+| `/classe arme:M4` | La classe d'une arme directement, sans passer par la tier list (le nom se complète tout seul en tapant). |
 
-Option `mode` sur les deux commandes : Multijoueur (par défaut), Résurgence, DMZ PvP, DMZ PvE.
+Option `mode` sur toutes les commandes : Multijoueur (par défaut), Résurgence, DMZ PvP, DMZ PvE.
+
+Les données du site sont gardées 5 minutes en mémoire, donc une modif sur wzstats.gg peut mettre jusqu'à 5 minutes à apparaître.
 
 ## Suivi automatique de la tier list
 

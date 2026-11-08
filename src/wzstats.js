@@ -69,7 +69,13 @@ async function get(url, as) {
   return res[as]();
 }
 
-export const fetchStore = async () => parsePage(await get(PAGE, 'text'));
+// shortcut: 5-min cache so /classe autocomplete answers within Discord's 3 s limit; data can be up to 5 min old.
+let cache;
+export async function fetchStore() {
+  if (!cache || Date.now() - cache.at > 5 * 60 * 1000) cache = { at: Date.now(), store: get(PAGE, 'text').then(parsePage) };
+  const { store } = cache;
+  try { return await store; } catch (err) { if (cache?.store === store) cache = null; throw err; }
+}
 
 export async function fetchBuilds(weaponId, mode) {
   const q = new URLSearchParams({ game: 'mw4', 'buildTypes[]': mode, addConversionKit: 'true', language: 'en', addNewBuilds: 'true' });

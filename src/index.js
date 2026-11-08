@@ -1,5 +1,5 @@
 import {
-  ActionRowBuilder, Client, EmbedBuilder, Events, GatewayIntentBits, SlashCommandBuilder, StringSelectMenuBuilder,
+  ActionRowBuilder, ButtonBuilder, ButtonStyle, Client, EmbedBuilder, Events, GatewayIntentBits, SlashCommandBuilder,
 } from 'discord.js';
 import { readFile, writeFile } from 'node:fs/promises';
 import {
@@ -17,8 +17,10 @@ const commands = [
   new SlashCommandBuilder().setName('meta').setDescription('Les classes META du moment (wzstats.gg)')
     .addStringOption((o) => o.setName('mode').setDescription('Mode de jeu').addChoices(...choices(MODES))),
   new SlashCommandBuilder().setName('tierlist').setDescription('Tier list par catégorie (wzstats.gg)')
-    .addStringOption((o) => o.setName('categorie').setDescription('Une seule catégorie, avec le choix de la classe à afficher')
-      .addChoices(...choices(CATEGORIES)))
+    .addStringOption((o) => o.setName('categorie').setDescription('Une seule catégorie').addChoices(...choices(CATEGORIES)))
+    .addStringOption((o) => o.setName('mode').setDescription('Mode de jeu').addChoices(...choices(MODES))),
+  new SlashCommandBuilder().setName('classe').setDescription("La classe (accessoires) d'une arme (wzstats.gg)")
+    .addStringOption((o) => o.setName('arme').setDescription("Nom de l'arme").setRequired(true).setAutocomplete(true))
     .addStringOption((o) => o.setName('mode').setDescription('Mode de jeu').addChoices(...choices(MODES))),
 ];
 
@@ -46,34 +48,44 @@ async function meta(interaction, mode) {
   await sendEmbeds(interaction, await Promise.all(weapons.map((w) => classEmbed(w, mode))));
 }
 
-async function tierlist(interaction, mode, category) {
-  const weapons = rankWeapons(await fetchStore(), mode);
-  const line = (w) => `${w.rank}. **${w.name}** · ${w.tier}`;
-  const embed = new EmbedBuilder().setColor(TIER_COLORS.META).setURL('https://wzstats.gg/mw4/meta')
+// One message per category: ranked list + one button per weapon that posts its class.
+// Discord allows 25 buttons per message (5 rows of 5), so a whole tier list can't fit in one.
+function categoryMessage(type, list, mode) {
+  const embed = new EmbedBuilder().setColor(TIER_COLORS[list[0].tier] ?? 0x888888)
+    .setTitle(`Tier list · ${CATEGORIES[type] ?? type}`).setURL('https://wzstats.gg/mw4/meta')
+    .setDescription(list.map((w) => `${w.rank}. **${w.name}** · ${w.tier}`).join('\n'))
     .setFooter({ text: `${MODES[mode]} · wzstats.gg` });
-
-  if (!category) {
-    embed.setTitle('Tier list MW4');
-    for (const [type, label] of Object.entries(CATEGORIES)) {
-      const list = weapons.filter((w) => w.type === type);
-      if (list.length) embed.addFields({ name: label, value: list.map(line).join('\n'), inline: true });
-    }
-    return interaction.editReply({ embeds: [embed] });
-  }
-
-  const list = weapons.filter((w) => w.type === category);
-  if (!list.length) return interaction.editReply(`Aucune arme dans la catégorie ${CATEGORIES[category]}.`);
-  embed.setTitle(`Tier list · ${CATEGORIES[category]}`).setDescription(list.map(line).join('\n'));
-  const menu = new StringSelectMenuBuilder().setCustomId(`class:${mode}`).setPlaceholder('Voir la classe de…')
-    .addOptions(list.slice(0, 25).map((w) => ({ label: `${w.rank}. ${w.name}`, description: `Tier ${w.tier}`, value: w.id })));
-  await interaction.editReply({ embeds: [embed], components: [new ActionRowBuilder().addComponents(menu)] });
+  const buttons = list.slice(0, 25).map((w) => new ButtonBuilder().setCustomId(`class:${mode}:${w.id}`)
+    .setLabel(`${w.rank}. ${w.name}`).setStyle(w.tier === 'META' ? ButtonStyle.Danger : ButtonStyle.Secondary));
+  const rows = [];
+  for (let i = 0; i < buttons.length; i += 5) rows.push(new ActionRowBuilder().addComponents(buttons.slice(i, i + 5)));
+  return { embeds: [embed], components: rows };
 }
 
-async function pickClass(interaction) {
-  const mode = interaction.customId.split(':')[1];
-  const weapon = rankWeapons(await fetchStore(), mode).find((w) => w.id === interaction.values[0]);
-  if (!weapon) return interaction.editReply('Cette arme n’est plus dans la tier list.');
+async function tierlist(interaction, mode, category) {
+  const weapons = rankWeapons(await fetchStore(), mode);
+  const types = category ? [category] : [...new Set([...Object.keys(CATEGORIES), ...weapons.map((w) => w.type)])];
+  const messages = types.map((type) => weapons.filter((w) => w.type === type)).filter((list) => list.length)
+    .map((list) => categoryMessage(list[0].type, list, mode));
+  if (!messages.length) return interaction.editReply(`Aucune arme dans la catégorie ${CATEGORIES[category] ?? category}.`);
+  await interaction.editReply(messages[0]);
+  for (const m of messages.slice(1)) await interaction.followUp(m);
+}
+
+// Shared by the weapon buttons and /classe: `query` is a weapon id or name.
+async function showClass(interaction, mode, query) {
+  const q = query.trim().toLowerCase();
+  const weapons = rankWeapons(await fetchStore(), mode);
+  const weapon = weapons.find((w) => w.id === query || w.name.toLowerCase() === q) ?? (q ? weapons.find((w) => w.name.toLowerCase().includes(q)) : undefined);
+  if (!weapon) return interaction.editReply(`Arme introuvable dans la tier list ${MODES[mode]} : ${query}`);
   await interaction.editReply({ embeds: [await classEmbed(weapon, mode)] });
+}
+
+async function autocompleteWeapon(interaction) {
+  const q = interaction.options.getFocused().toLowerCase();
+  const weapons = rankWeapons(await fetchStore(), interaction.options.getString('mode') ?? 'mw4');
+  await interaction.respond(weapons.filter((w) => w.name.toLowerCase().includes(q)).slice(0, 25)
+    .map((w) => ({ name: `${w.name} · ${CATEGORIES[w.type] ?? w.type} · ${w.tier}`, value: w.id })));
 }
 
 // Tier list watch: every 30 min, compare with the last saved snapshot and post what moved.
@@ -111,7 +123,7 @@ const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
 client.once(Events.ClientReady, async (c) => {
   await c.application.commands.set(commands.map((cmd) => cmd.toJSON()));
-  console.log(`Connecté en tant que ${c.user.tag}, commandes /meta et /tierlist enregistrées.`);
+  console.log(`Connecté en tant que ${c.user.tag}, commandes /meta, /tierlist et /classe enregistrées.`);
 
   if (!process.env.ALERT_CHANNEL_ID) return console.log('ALERT_CHANNEL_ID absent : pas de suivi de la tier list.');
   const check = () => checkTierList(c).catch((err) => console.error('Suivi tier list :', err));
@@ -120,14 +132,19 @@ client.once(Events.ClientReady, async (c) => {
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
+  if (interaction.isAutocomplete()) return autocompleteWeapon(interaction).catch((err) => console.error('Autocomplétion :', err));
   const isCommand = interaction.isChatInputCommand();
-  const isPick = interaction.isStringSelectMenu() && interaction.customId.startsWith('class:');
-  if (!isCommand && !isPick) return;
+  const isButton = interaction.isButton() && interaction.customId.startsWith('class:');
+  if (!isCommand && !isButton) return;
   try {
     await interaction.deferReply();
-    if (isPick) return await pickClass(interaction);
+    if (isButton) {
+      const [, mode, weaponId] = interaction.customId.split(':');
+      return await showClass(interaction, mode, weaponId);
+    }
     const mode = interaction.options.getString('mode') ?? 'mw4';
     if (interaction.commandName === 'meta') await meta(interaction, mode);
+    else if (interaction.commandName === 'classe') await showClass(interaction, mode, interaction.options.getString('arme'));
     else await tierlist(interaction, mode, interaction.options.getString('categorie'));
   } catch (err) {
     console.error(err);
